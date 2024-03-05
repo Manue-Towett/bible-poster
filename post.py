@@ -1,5 +1,6 @@
 import re
 import os
+import json
 import argparse
 import threading
 import dataclasses
@@ -139,29 +140,29 @@ class BibleVersePoster:
 
             return
 
-        with open(filepath, encoding="utf-8") as file: 
-            html = file.read().replace("\n", "").replace(" ", "&nbsp;")
+        with open(filepath, encoding="utf-8") as file: return file.read()
+    
+    @staticmethod
+    def __format_html(html: str) -> str:
+        """Formats the html to be posted"""
+        html = html.replace("\n", "").replace(" ", "&nbsp;")
 
-            html = html.replace("<", "&lt;").replace(">", "&gt;")
+        html = html.replace("<", "&lt;").replace(">", "&gt;")
 
-            html = html.strip("[parsehtml]").strip("[/parsehtml]")
+        html = html.strip("[parsehtml]").strip("[/parsehtml]")
 
-            html = f'[parsehtml]<div data-xf-p="1">{html}</div>[/parsehtml]'
+        html = f'[parsehtml]<div data-xf-p="1">{html}</div>[/parsehtml]'
 
-            html = html.replace("[parsehtml]", '<div data-xf-p="1">[parsehtml]</div>')
+        html = html.replace("[parsehtml]", '<div data-xf-p="1">[parsehtml]</div>')
 
-            return html.replace('[/parsehtml]', '<div data-xf-p="1">[/parsehtml]</div>', 1)
+        return html.replace('[/parsehtml]', '<div data-xf-p="1">[/parsehtml]</div>', 1)
     
     def __get_chapter(self, html: str) -> str:
-        """Extract the book and chapter from the html string"""
-        id_re = re.search(r".*?id\s*=\s*\"?\'?(\w+?_\d{1,3})", html, re.DOTALL)
-
-        if id_re:
-            return id_re.group(1)
-        
+        """Extract the book and chapter from the html string"""        
         soup = BeautifulSoup(html, "html.parser")
 
-        return soup.select_one("div").get("id")
+        for div in soup.select("div"):
+            if div.attrs.get("id"): return div.attrs.get("id")
     
     @staticmethod
     def __extract_verse_payload(response: requests.Response) -> Tuple[dict[str, str], str]:
@@ -270,7 +271,7 @@ class BibleVersePoster:
         books = [" ".join(i.split(" ")[:-1]) for i in posted_resources]
 
         while True:
-            file_path = self.queue.get()
+            file_path, startrow = self.queue.get()
 
             html_content = self.__read_html_file(filepath=file_path)
 
@@ -288,18 +289,11 @@ class BibleVersePoster:
 
                 continue
 
-            book, chapter = re.search(r"(\w+)_(\d+)", book_chapter).groups()
+            book, chapter = re.search(r"([\w\s]+)_(\d+)", book_chapter).groups()
 
             book = book.capitalize()
 
-            start_chapter, found = 0, False
-
-            if book in books:
-                for i, b in enumerate(posted_resources):
-                    if book in b: 
-                        start_chapter, found = i, True
-
-                        break
+            html_content = self.__format_html(html_content)
 
             if f"{book} {chapter}" in posted_resources:
                 if not self.is_update:
@@ -313,14 +307,12 @@ class BibleVersePoster:
 
                 continue
 
-            order = str(int(chapter) + start_chapter) if found else len(posted_resources) + int(chapter)
+            order = str(int(chapter) + startrow)
 
             payload = {"title": f"{book} {chapter}", 
                        "tag_line": f"{book} Chapter {chapter}",
                        "description_html": html_content,
                        'xc_rc_display_order': order}
-            
-            if found: posted_resources.insert(int(order), f'{book} {chapter}')
             
             self.__post_verse(payload, post_url, file_path.split("/")[-1])
 
@@ -331,26 +323,52 @@ class BibleVersePoster:
         grouped_files: dict[str, list] = {}
 
         for file in html_files:
-            book = re.search(r"\d+([a-zA-Z_\s]+)\d+", file).group(1)
+            book = re.search(r"\d{5,5}(\d?\s*[a-zA-Z_\s]+)\d+", file).group(1)
 
             grouped_files[book].append(file) if grouped_files.get(book) \
             else grouped_files.update({book: [file]})
         
         self.len_queue = sum([len(v) for _, v in grouped_files.items()])
 
+        with open("./utils/books.json") as f: ordered_books: dict[str, list] = json.load(f)
+
+        grouped_files = self.__order_by_book(grouped_files, list(ordered_books.keys()))
+
+        order, startrow = {}, 0
+
+        for kl in list(ordered_books.keys()): 
+            if grouped_files.get(kl): order[kl] = startrow
+
+            if len(order) == len(grouped_files): break
+
+            startrow += ordered_books.get(kl)
+
         if len(posted):
             for k in list(grouped_files.keys()):
                 if re.search(rf"{k}", " ".join(posted), re.I):
-                    [self.queue.put(i) for i in grouped_files.get(k)]
+                    [self.queue.put((i, order.get(k))) for i in grouped_files.get(k)]
 
                     self.queue.join()
 
                     grouped_files.pop(k)
 
-        for _, files in grouped_files.items():
-            [self.queue.put(f) for f in files]
+        for k, files in grouped_files.items():
+            [self.queue.put((f, order.get(k))) for f in files]
 
             self.queue.join()
+    
+    def __order_by_book(self, html_files: dict[str, list], ordered_books: list[str]) -> dict[str, list]:
+        """Orders the book following biblical order"""
+        ordered_files = {}
+
+        for book in ordered_books:
+            for k, v in html_files.items():
+                if re.search(k, book, re.I):
+                    ordered_files[book] = v
+
+                    break
+            
+            if len(ordered_files) == len(html_files): return ordered_files
 
     def post(self, input_path: str) -> None:
         """Entry point to the poster"""
