@@ -252,7 +252,7 @@ class BibleVersePoster:
         else:
             self.failed.append("")
 
-            self.logger.warn(f"Failed to upload file {filename} \n  <<{response.json()['errors']['0']}>>")
+            self.logger.warn(f"Failed to upload file {filename} \n  <<{str(response.json())}>>")
     
     def __update(self, html_content: str, book: str, chapter: str, file_path: str) -> None:
         """Updates existing resource"""
