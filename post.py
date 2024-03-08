@@ -242,7 +242,7 @@ class BibleVersePoster:
         if response.json()["status"] == "ok": 
             self.posted.append("")
 
-            queue = self.len_queue - len(self.posted)
+            queue = self.len_queue - len(self.posted) - len(self.failed)
 
             info_text = f"Queue: {queue} || Posted: {len(self.posted)}"
 
@@ -252,7 +252,7 @@ class BibleVersePoster:
         else:
             self.failed.append("")
 
-            self.logger.warn(f"Failed to upload file {filename} \n  <<{str(response.json())}>>")
+            self.logger.warn(f"Failed to post file {filename} \n  <<{str(response.json())}>>")
     
     def __update(self, html_content: str, book: str, chapter: str, file_path: str) -> None:
         """Updates existing resource"""
@@ -267,9 +267,7 @@ class BibleVersePoster:
                 return
 
     def __work(self, post_url: str, posted_resources: list[str]) -> None:
-        """Work to be done by threads"""
-        books = [" ".join(i.split(" ")[:-1]) for i in posted_resources]
-
+        """Work to be done by threads"""        
         while True:
             file_path, startrow = self.queue.get()
 
@@ -323,12 +321,12 @@ class BibleVersePoster:
         grouped_files: dict[str, list] = {}
 
         for file in html_files:
-            book = re.search(r"\d{5,5}(\d?\s*[a-zA-Z_\s]+)\d+", file).group(1)
+            book = re.search(r"\d{5,5}((\d?\s?)[a-zA-Z_\s]+)\d+", file).group(1)
 
             grouped_files[book].append(file) if grouped_files.get(book) \
             else grouped_files.update({book: [file]})
         
-        self.len_queue = sum([len(v) for _, v in grouped_files.items()])
+        self.len_queue = len(html_files)
 
         with open("./utils/books.json") as f: ordered_books: dict[str, list] = json.load(f)
 
@@ -363,7 +361,7 @@ class BibleVersePoster:
 
         for book in ordered_books:
             for k, v in html_files.items():
-                if re.search(k, book, re.I):
+                if re.match(k, book, re.I):
                     ordered_files[book] = v
 
                     break

@@ -23,7 +23,7 @@ For linux/mac:
         python3 post.py -i <input path> --update e.g python3 post.py -i ./input/ --update
     
     Without updating:
-        eg python3 main.py -i ./input/ 
+        eg python3 post.py -i ./input/ 
 
 For windows:
 
@@ -31,4 +31,4 @@ For windows:
         python post.py -i <input path> --update e.g python post.py -i ./input/ --update
     
     Without updating:
-        eg python main.py -i ./input/ 
+        eg python post.py -i ./input/ 
